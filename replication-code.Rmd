@@ -1,0 +1,434 @@
+---
+title: "Replication Code"
+author: "Micah Clark Moody"
+output:
+  html_document
+---
+
+Welcome to this replication code! There are only TWO steps to make sure this runs on your computer.
+
+First, make sure you have all of the library packages installed.
+
+Second, rename the data paths to the data downloaded on your local device. 
+
+# Setup 
+
+```{r}
+
+# path for detention data
+dashboard_path <- "YOUR PATH"
+
+# path for reform-oriented data
+initiation_path <- "YOUR PATH"
+
+# path for key to clean gun possession data 
+gun_level_key_path <- "YOUR PATH"
+
+```
+
+```{r setup}
+
+library(tidyverse)
+library(readxl)
+library(skimr)
+library(lubridate)
+library(modelsummary)
+library(MASS)               # for ologit models
+library(nnet)               # for multinomial logit
+library(marginaleffects)    # marginal effect calculations
+library(knitr)              # to build kable() table
+library(gofcat)             # for brant test
+library(tinytable)          # to hold tables in place
+
+```
+
+# Import Data
+
+After this point, the code should run without intervention.
+
+```{r}
+
+# formatting document globally
+
+# rounding decimals at ones place
+options(digits = 2)
+
+# setting greyscale for plots
+options(ggplot2.discrete.colour = scale_colour_grey, ggplot2.discrete.fill = scale_fill_grey)
+
+```
+
+```{r}
+
+# dashboard offense category vectors
+
+dash_narcotics <- c("Narcotics")
+dash_uuw <- c("Unlawful Use of Weapons", "Armed Violence", "Armed Habitual Criminal")
+dash_property <- c("Burglary", "Theft", "Retail Theft", "Criminal Damage to Property", "Identity Theft", "Vehicular Invasion", "Arson", "Fraud", "Forgery", "Home Invasion", "Criminal Trespass", "Criminal Trespass to Vehicle")
+dash_driving <- c("Driving With Suspended Or Revoked License", "DUI", "Agg DUI", "Failure Report Accident", "Reckless Driving", "Speeding", "Traffic", "PSMV")
+dash_arrest_violation <- c("Resisting Police Officer", "Out of County Warrant", "Violation of Order of Protection", "Obstructing Justice", "Escape - Failure to Return", "Crimial Contempt", "Fugitive from Justice", "VOB", "Gun Offender Registration Ordinance", "Fleeing")
+dash_violence_against_a_person <- c("Attempt Murder", "Sex Crimes", "Robbery", "Assault", "Battery", "Agg Assault", "Domestic Battery", "Agg Battery", "Murder", "Kidnaping", "Unlawful Restraint", "Criminal Abuse of Elderly", "Reckless Homicide")
+dash_other <- c("Not Categorized", "Public Drinking", "Soliciting Unlawful Business", "Reckless Conduct", "Disorderly Conduct", "Prostitution", "Unlawful Use of ID Card", "Public Indecency", "Gambling", "Mob Action", "Terrorism", "NULL", "Reckless Discharge of Firearm", "Agg Discharge of a Firearm", "Hate Crime", "Child Endangerment", "Stalking", "Intimidation", "Harassment")
+
+# initiation offense category vectors
+
+narcotics <- c("Narcotics")
+uuw <- c("UUW - Unlawful Use of Weapon", "Gun - Non UUW", "Gun Running")
+property <- c("Criminal Damage to Property", "Arson", "Attempt Arson", "Arson and Attempt Arson", "Criminal Trespass To Residence", "Retail Theft", "Residential Burglary", "Burglary", "Theft", "Armed Robbery", "Robbery", "Identity Theft", "Forgery", "Home Invasion", "Credit Card Cases", "Fraudulent ID", "Fraud", "Vehicular Hijacking", "Aggravated Robbery", "Deceptive Practice", "Aggravated Identity Theft", "Theft by Deception", "Attempt Armed Robbery", "Attempt Vehicular Hijacking", "Vehicular Invasion", "Possession Of Burglary Tools")
+driving <- c("Aggravated DUI", "DUI", "Driving With Suspended Or Revoked License", "Possession of Stolen Motor Vehicle")
+arrest_violation <- c("Escape - Failure to Return", "Failure to Register as a Sex Offender", "Violation Order Of Protection", "Violate Bail Bond", "Possession of Contraband in Penal Institution", "Aggravated Battery Police Officer", "Aggravated Fleeing and Eluding", "Aggravated Assault Police Officer", "Obstructing Justice", "Impersonating Police Officer", "Disarming Police Officer")
+violence_against_a_person <- c("Battery", "Attempt Homicide", "Aggravated Battery With A Firearm", "Kidnapping", "Unlawful Restraint", "Homicide", "Child Abduction", "Aggravated Discharge Firearm", "Reckless Homicide", "Domestic Battery")
+other <- c("Other Offense", "Reckless Discharge of Firearm", "Prostitution", "Bribery", "Bomb Threat", "Hate Crimes", "Gambling", "Dog Fighting", "PROMIS Conversion", "Possession of Explosives", "Communicating With Witness", "Official Misconduct", "Perjury", "Tampering", "Child Pornography", "Human Trafficking", "Pandering", "Stalking", "Intimidation")
+
+```
+```{r}
+
+# IMPORT DASHBOARD DATA
+
+# dashboard returns
+dashboard <- read_xlsx(dashboard_path)
+
+# RESTRUCTURE DASHBOARD VARIABLES
+
+# DATE
+dashboard$HEARING_DATE <- as.Date(dashboard$HEARING_DATE)
+
+# CATEGORICAL
+
+# detained
+
+dashboard$DETAINED <- ifelse(dashboard$DETAINED == "Yes", 1, 0) #TODO option to explore NULL and unknown to see if 0 is accurate
+
+# NEW VARIABLES
+
+# gun possession charge level and license status
+
+gun_level_key <- read.csv(gun_level_key_path) #TODO option to deselect the redundant columns
+
+dashboard <- dashboard %>%  # merge key with existing data frame setting missing values as NA
+    left_join(gun_level_key, by = "TOP_CHARGE") %>% 
+    mutate(gun_case = replace_na(gun_case, 0))  #TODO add all gun charges to the key so this statement is accurate. Currently it's all gun charges with 10 or more cases.
+
+# era
+
+# era saving date ranges
+
+foxx_first <- ymd("2016-12-01")
+money_bail_last <- ymd("2023-09-17")
+no_bail_first <- ymd("2023-09-18")
+foxx_last <- ymd("2024-11-30")
+burke_first <- ymd("2024-12-01")
+burke_last <- ymd("2028-11-30")
+
+# era saving date intervals
+
+money_bail_progressive_sao <- interval(foxx_first, money_bail_last)
+no_money_progressive_sao <- interval(no_bail_first, foxx_last)
+no_monney_conservative_sao <- interval(burke_first, burke_last)
+
+# era creating new variable
+
+dashboard <- dashboard %>% 
+  mutate(era = case_when(HEARING_DATE %within% money_bail_progressive_sao ~ "Era 1", HEARING_DATE %within% no_money_progressive_sao ~ "Reform-Oriented Prosecutor", HEARING_DATE %within% no_monney_conservative_sao ~ "Conservative Prosecutor"))
+
+# era factor variable
+
+dashboard$era <- factor(dashboard$era, levels = c("Reform-Oriented Prosecutor", "Conservative Prosecutor"))
+
+# charge category bigger groups 
+
+dashboard <- dashboard %>% 
+  mutate(category = case_when(OFFENSE_CATEGORY %in% dash_narcotics ~ "narcotics", OFFENSE_CATEGORY %in% dash_uuw ~ "uuw", OFFENSE_CATEGORY %in% dash_property ~ "property", OFFENSE_CATEGORY %in% dash_driving ~ "driving", OFFENSE_CATEGORY %in% dash_arrest_violation ~ "arrest_violation", OFFENSE_CATEGORY %in% dash_other ~ "other", OFFENSE_CATEGORY %in% dash_violence_against_a_person ~ "violence_against_a_person"))
+
+dashboard$category <- factor(dashboard$category, levels = c("arrest_violation", "driving", "narcotics", "other", "property", "uuw", "violence_against_a_person"), labels = c("Arrest and Violation", "Driving", "Narcotics", "Other", "Property", "Gun Possession", "Violence Against a Person"))
+
+```
+
+```{r}
+
+# IMPORT INITIATION DATA
+
+# initiation from open data portal
+initiation_all_charges <- read.csv(initiation_path)
+initiation <- filter(initiation_all_charges, PRIMARY_CHARGE_FLAG == "true")
+
+# RESTRUCTURE INITIATION DATA
+
+# DATE VARIABLES
+
+# initiation open data 
+initiation$RECEIVED_DATE <- as_date(initiation$RECEIVED_DATE)
+
+# CATEGORICAL VARIABLES
+
+# race
+
+recode_race <- function(x){case_when(x %in% c("Black") ~ "black", x %in% c("HISPANIC", "White [Hispanic or Latino]", "White/Black [Hispanic or Latino]") ~ "latinx", x %in% c("White", "CAUCASIAN") ~ "white", x %in% c("American Indian", "Native Hawaiian or Other Pacific Islander") ~ "native", x %in% c("Asian", "ASIAN") ~ "asian", x %in% c("Biracial", "Middle Eastern/North African", "Albino", "", "Unknown") ~ "unclear")}
+
+race_fct_lvl <- c("white", "black", "latinx", "native", "asian", "unclear")
+
+initiation$RACE <- recode_race(initiation$RACE)
+
+initiation$RACE <- factor(initiation$RACE, levels = race_fct_lvl, ordered = FALSE)
+
+# charge level
+
+initiation <- initiation %>% 
+    filter(CLASS %in% c("X", "2", "3", "4"))
+
+initiation$CLASS <- factor(initiation$CLASS, levels = c("4", "3", "2", "X"), ordered = TRUE)
+
+# bond type initial
+
+initiation$BOND_TYPE_INITIAL <- factor(initiation$BOND_TYPE_INITIAL, levels = c("I Bond", "D Bond", "C Bond", "No Bond"), ordered = TRUE)
+
+# CREATE VARIABLES
+
+# offense category
+
+initiation <- initiation %>%
+    mutate("category" = case_when(UPDATED_OFFENSE_CATEGORY %in% narcotics ~ "narcotics", UPDATED_OFFENSE_CATEGORY %in% uuw ~ "uuw", UPDATED_OFFENSE_CATEGORY %in% property ~ "property", UPDATED_OFFENSE_CATEGORY %in% driving ~ "driving", UPDATED_OFFENSE_CATEGORY %in% arrest_violation ~ "arrest_violation", UPDATED_OFFENSE_CATEGORY %in% other ~ "other", UPDATED_OFFENSE_CATEGORY %in% violence_against_a_person ~ "violence_against_a_person"))
+
+# era (if needed)
+
+# NUMERIC 
+
+initiation$BOND_AMOUNT_INITIAL <- as.numeric(gsub(",", "", initiation$BOND_AMOUNT_INITIAL))
+
+```
+
+```{r}
+
+era <- c("Era 1", "Era 2", "Era 3")
+prosecutor <- c("Reform-Oriented", "Reform-Oriented", "Conservative")
+bail <- c("Money Bail", "No Money Bail", "No Money Bail")
+dates <- c("Dec. 1, 2018 to Sept. 17, 2023", "Sept. 18, 2023 to Nove. 31, 2024", "December 1, 2024 to Present")
+dataset <- c("Reform-Oriented Only", "Reform-Oriented and Detention", "Detention Only")
+unique <- c("Race, Gender, Class", "Race, Gender, Class and Prosecutor Detention Request, Detention", "Prosecutor Detention Request, Detention")
+
+dataset_table <- data.frame(era, prosecutor, bail, dates, dataset, unique)
+
+tt(dataset_table, caption = "Era and Dataset Description", col.names = c("Era", "Dates", "Bail Law", "Prosecutor", "Dataset", "Unique Var."), placement = "H", width = c(0.1, 0.1, 0.1, 0.2, 0.1, 0.4))
+
+```
+
+# Hypothesis 1: Change in gun possession detention is driving detention rates. Supported. 
+
+```{r}
+
+# run models
+
+logistic_detained_era <-  glm(DETAINED ~ relevel(era, ref = "Reform-Oriented Prosecutor")*category, family = binomial, data = dashboard)
+
+lpm_detained_era <- lm(DETAINED ~ relevel(era, ref = "Reform-Oriented Prosecutor")*category, data = dashboard)
+
+probit_detained_era <- glm(DETAINED ~ relevel(era, ref = "Reform-Oriented Prosecutor")*category, family = binomial(probit), data = dashboard)
+
+# identical AIC and BIC
+# don't present together because logit is in log-odds or odds ratio while probit is in change in z-score
+
+```
+
+```{r}
+
+plot_predictions(lpm_detained_era, condition = c("category", "era"), vcov = "HC3") + labs(title = "Linear probabiltiy model predicted probabiltiy of detention for era and charge category", x = "Charge Category", y = "Predicted Probability of Detention", color = "Prosecutor Era") + theme_minimal() + theme(legend.position = "bottom")
+
+```
+
+## Hypothesis 2: There are lower detention rates for gun possession with a license. Supported.
+
+```{r}
+
+# create dataset
+
+gun_data <- dashboard %>% 
+  filter(gun_case == 1) %>% 
+  filter(top_charge_level == "level_4") %>% 
+  filter(gun_license %in% c("No FOID or CCL", "FOID no CCL", "FOID and CCL"))
+
+gun_data$gun_license <- factor(gun_data$gun_license, levels = c("No FOID or CCL", "FOID no CCL", "FOID and CCL", "Unclear", ""), ordered = FALSE)
+
+```
+
+```{r}
+
+# generate models
+
+binom_era <- glm(DETAINED ~ era, family = binomial, data = gun_data)
+
+binom_era_lic_level <- glm(DETAINED ~ era + relevel(gun_license, ref = "No FOID or CCL"), family = binomial, data = gun_data)
+
+```
+
+```{r}
+
+coef_list_2 <- c("eraConservative Prosecutor" = "Conservative Prosecutor", "relevel(gun_license, ref = \"No FOID or CCL\")FOID and CCL" = "FOID and CCL", "relevel(gun_license, ref = \"No FOID or CCL\")FOID no CCL" = "FOID, no CCL")
+
+# present models
+
+hyp_2_model <- modelsummary(list("Era Only" = binom_era, "Era and License" = binom_era_lic_level), exp = TRUE, ci_method = "wald", fmt = 3, stars = TRUE, gof_map = c("nobs", "aic", "bic"), coef_map = coef_list_2, title = "Odds Ratio Results from Logit Model for Gun Possession Charges", output = "tinytable")
+
+theme_latex(hyp_2_model, placement = "H")
+
+era_license_count <- gun_data %>% 
+  group_by(era, gun_license) %>% 
+  summarise(n())
+
+```
+
+## Hypothesis 3: Black defendants receive harsher release types than non-Black people.
+
+```{r}
+
+# create dataset
+
+initiation_demo_filter <- initiation %>% 
+    filter(GENDER %in% c("Female", "Male")) %>% 
+    filter(RACE %in% c("black", "white", "latinx")) %>% 
+    filter(!is.na(category)) %>% 
+    filter(!is.na(AGE_AT_INCIDENT))
+
+initiation_demo_filter$RACE <- factor(initiation_demo_filter$RACE, levels = c("black", "white", "latinx"))
+
+```
+
+```{r}
+
+# create models
+
+model_race <- polr(BOND_TYPE_INITIAL ~ RACE, Hess = T, data = initiation_demo_filter)
+
+model_demo <- polr(BOND_TYPE_INITIAL ~ RACE + GENDER + AGE_AT_INCIDENT, Hess = T, data = initiation_demo_filter)
+
+model_class_category <- polr(BOND_TYPE_INITIAL ~ CLASS + category, Hess = T, data = initiation_demo_filter)
+
+model_race_gender_class_category <- polr(BOND_TYPE_INITIAL ~ RACE + GENDER + CLASS + category, Hess = T, data = initiation_demo_filter)
+
+model_demo_class_category <- polr(BOND_TYPE_INITIAL ~ RACE + GENDER + AGE_AT_INCIDENT + CLASS + category, Hess = T, data = initiation_demo_filter)
+
+```
+
+```{r}
+
+# display models
+
+coef_subset <- c("I Bond|D Bond" = "I Bond|D Bond", "D Bond|C Bond" = "D Bond|C Bond", "C Bond|No Bond" = "C Bond|No Bond", "RACEwhite" = "White", "RACElatinx" = "Latinx")
+
+hyp_3a_model <- modelsummary(list("Race Only" = model_race, "Charge Only" = model_class_category, "Demographics and Charge" = model_demo_class_category), exp = TRUE, ci_method = "wald", fmt = 3, stars = TRUE, coef_map = coef_subset, title = "Ordered Logistic Regression Odds Ratio Models with Race, Charge, and Controls on Bond Type", output = "tinytable")
+
+theme_latex(hyp_3a_model, placement = "H")
+
+```
+
+## Hypothesis 4: The defendant being black is correlated with a higher bond amount. Supported.
+
+```{r}
+
+# create dataset for only cases where money bail is set
+
+initiation_bond_set <- initiation_demo_filter %>%  # starting with the same dataset as the analysis with demographic controls
+    filter(BOND_TYPE_INITIAL %in% c("D Bond", "C Bond")) %>%
+
+    # create a column of release cost (10% of D Bond amount)
+    mutate(release_cost = ifelse(BOND_TYPE_INITIAL == "D Bond", BOND_AMOUNT_INITIAL/10, BOND_AMOUNT_INITIAL)) %>% 
+    filter(!is.na(release_cost), release_cost > 0)
+
+
+initiation_bond_set$CLASS <- factor(initiation_bond_set$CLASS, levels = c("4", "3", "2", "X"), ordered = FALSE)
+
+# test for skew by comparing mean and median
+
+mean_release_cost <- mean(initiation_bond_set$release_cost)
+median_release_cost <- median(initiation_bond_set$release_cost)
+
+```
+
+```{r}
+
+# create models
+
+lm_race_bond <- lm(log(release_cost) ~ factor(RACE, ordered = FALSE) + AGE_AT_INCIDENT + GENDER, data = initiation_bond_set)
+
+lm_class_bond <- lm(log(release_cost) ~ relevel(CLASS, ref = "4") + category, data = initiation_bond_set)
+
+lm_race_class_bond <- lm(log(release_cost) ~ factor(RACE, ordered = FALSE) + AGE_AT_INCIDENT + GENDER + relevel(CLASS, ref = "4") + category, data = initiation_bond_set)
+
+```
+
+```{r}
+
+# present results
+
+coef_list <- c("(Intercept)" = "Intercept", "factor(RACE, ordered = FALSE)black" = "Black", 'relevel(factor(RACE, ordered = FALSE), ref = "black")white' = "White", "factor(RACE, ordered = FALSE)latinx" = "Latinx", 'relevel(factor(RACE, ordered = FALSE), ref = "black")latinx' = "Latinx", "factor(RACE, ordered = FALSE)native" = "Native American", 'relevel(factor(RACE, ordered = FALSE), ref = "black")native' = "Native American", "factor(RACE, ordered = FALSE)asian" = "Asian", 'relevel(factor(RACE, ordered = FALSE), ref = "black")asian' = "Asian", "factor(RACE, ordered = FALSE)unclear" = "Race Unclear", 'relevel(factor(RACE, ordered = FALSE), ref = "black")unclear' = "Race Unclear", "AGE_AT_INCIDENT" = "Age", "GENDERMale" = "Male", 'relevel(CLASS, ref = "4")3' = "Class 3", 'relevel(CLASS, ref = "4")2' = "Class 2", 'relevel(CLASS, ref = "4")X' = "Class X")
+
+hyp_3b_model <- modelsummary(list("Demographics Only" = lm_race_bond, "Charge Only" = lm_class_bond, "Demographics and Charge" = lm_race_class_bond), fmt = 3, gof_map = c("nobs", "aic", "bic"), stars = TRUE, coef_map = coef_list, title = "Table Comparing Linear Regression Results for Race and Charge on Log Money Bail Amount", subtitle = "Charge category results are calculated but no presented. See Appendix for all coefficients.", output = "tinytable")
+
+theme_latex(hyp_3b_model, placement = "H")
+
+```
+
+# Conclusion
+
+```{r}
+
+hyp <- c("Hypothesis 1", "Hypothesis 2", "Hypothesis 3", "Hypothesis 4")
+hyp_words <- c("Change in gun possession detention is driving detention rates.","There are lower detention rates for gun possession with a license.", "Black defendants receive harsher release types than non-Black people.", "The defendant being black is correlated with a higher bond amount.")
+hyp_outcome <- c("Supported", "Supported", "Mixed Results", "Supported")
+
+hyp_table <- data.frame(hyp, hyp_words, hyp_outcome)
+
+colnames(hyp_table) <- c("Number", "Hypothesis", "Finding")
+
+hyp_table <- tt(hyp_table, caption = "Hypothesis Findings")
+
+theme_latex(hyp_table, placement = "H")
+
+```
+
+# Appendix
+
+## Hypothesis 1: Change in gun possession detention is driving detention rates.
+
+```{r}
+
+coef_list_1_app <- c("relevel(era, ref = \"Reform-Oriented Prosecutor\")Conservative Prosecutor" = "Conservative Prosecutor", "categoryDriving" = "Driving", "categoryNarcotics" = "Narcotics", "categoryOther" = "Other", "categoryProperty" = "Property", "categoryGun Possession" = "Gun Possession", "categoryViolence Against a Person" = "Violence Against a Person", "relevel(era, ref = \"Reform-Oriented Prosecutor\")Conservative Prosecutor:categoryDriving" = "Conservative × Driving", "relevel(era, ref = \"Reform-Oriented Prosecutor\")Conservative Prosecutor:categoryNarcotics" = "Conservative × Narcotics", "relevel(era, ref = \"Reform-Oriented Prosecutor\")Conservative Prosecutor:categoryOther" = "Conservative × Other", "relevel(era, ref = \"Reform-Oriented Prosecutor\")Conservative Prosecutor:categoryProperty" = "Conservative × Property", "relevel(era, ref = \"Reform-Oriented Prosecutor\")Conservative Prosecutor:categoryGun Possession" = "Conservative × Gun Possession", "relevel(era, ref = \"Reform-Oriented Prosecutor\")Conservative Prosecutor:categoryViolence Against a Person" = "Conservative × Violence Against a Person")
+
+app_1 <- modelsummary(list("Logistic Log-Odds" = logistic_detained_era, "Probit Change in Z-Score" = probit_detained_era, "LPM Model" = lpm_detained_era), ci_method = "wald", fmt = 3, stars = TRUE, gof_map = c("nobs", "aic", "bic"), coef_map = coef_list_1_app, output = "tinytable")
+
+theme_latex(app_1, placement = "H")
+
+```
+
+## Hypthesis 3: Race on Bond Type Model Comparison 
+
+```{r display-models}
+
+coef_list <- c("I Bond|D Bond" = "I Bond|D Bond", "D Bond|C Bond" = "D Bond|C Bond", "C Bond|No Bond" = "C Bond|No Bond", "RACEwhite" = "White", "RACElatinx" = "Latinx", "GENDERMale" = "Male", "AGE_AT_INCIDENT" = "Age", "CLASS.L" = "Class X", "CLASS.Q" = "Class 2", "CLASS.C" = "Class 3", "categorydriving" = "Driving", "categorynarcotics" = "Narcotics", "categoryother" = "Other", "categoryproperty" = "Property", "categoryuuw" = "Gun Possession", "categoryviolence_against_a_person" = "Violence Against Another Person")
+
+hyp_3_app <- modelsummary(list("Race Only" = model_race, "Demographics and Charge" = model_demo_class_category), ci_method = "wald", fmt = 3, stars = TRUE, gof_map = c("nobs"), coef_map = coef_list, output = "tinytable")
+
+theme_latex(hyp_3_app, inner = "cells={font=\\small}", placement = "H")
+
+```
+
+```{r}
+
+# brant test model
+
+hyp_3_brant_results <- brant.test(model_race_gender_class_category)
+
+```
+
+## Hypothesis 4: Race and Charge on Money Bail Amount Comparison
+
+```{r}
+
+# present results
+
+coef_list <- c("(Intercept)" = "Intercept", "factor(RACE, ordered = FALSE)black" = "Black", 'relevel(factor(RACE, ordered = FALSE), ref = "black")white' = "White", "factor(RACE, ordered = FALSE)latinx" = "Latinx", 'relevel(factor(RACE, ordered = FALSE), ref = "black")latinx' = "Latinx", "AGE_AT_INCIDENT" = "Age", "GENDERMale" = "Male", 'relevel(CLASS, ref = "4")3' = "Class 3", 'relevel(CLASS, ref = "4")2' = "Class 2", 'relevel(CLASS, ref = "4")X' = "Class X", "categorydriving" = "Driving", "categorynarcotics" = "Narcotics", "categoryother" = "Other", "categoryproperty" = "Property", "categoryuuw" = "Gun Possession", "categoryviolence_against_a_person" = "Violence Against Another Person")
+
+hyp_3b_app <- modelsummary(list("Demographics Only" = lm_race_bond, "Charge Only" = lm_class_bond, "Demographics and Charge" = lm_race_class_bond), fmt = 3, gof_map = c("nobs", "aic", "bic"), stars = TRUE, coef_map = coef_list, title = "Table Comparing Linear Regression Results for Race and Charge on Money Bail Amount", subtitle = "Charge category results are calculated but no presented. See Appendix for all coefficients.", output = "tinytable")
+
+theme_latex(hyp_3b_app, placement = "H")
+
+```
