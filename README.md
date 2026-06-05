@@ -14,7 +14,11 @@ Claims in the paper - for example median is x or brant test is y - are included 
 
 # Data 
 
-There are two datasets presented in this paper: reform-oriented data and detention data.
+There are three datasets presented in this paper: 
+
+1. reform-oriented data 
+1. detention data
+1. key to clean gun charges
 
 Reform-oriented data is available here: (Cook County "Initiation Data")[https://datacatalog.cookcountyil.gov/Legal-Judicial/Initiation/7mck-ehwz/about_data]
 
@@ -22,6 +26,8 @@ Reform-oriented data is available here: (Cook County "Initiation Data")[https://
 * *Reform-oriented data is not saved in this repository because it is bigger than my storage limit. If there are access issues, please feel free to rech out to me at clarkmoody@u.northwestern.edu and I'll share a copy!*
 
 Detention data is available here: (Detention Data)[https://github.com/MicahCM/arraignment-data/blob/main/detention_data.xlsx]
+
+Key to clean gun charges is available here: (Gun Key)[https://github.com/MicahCM/arraignment-data/blob/main/gun_key.csv]
 
 # Replication Code
 
